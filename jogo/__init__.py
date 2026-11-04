@@ -1,1 +1,1 @@
-"""Pacote do jogo de batalha por turnos."""
+"""Arena Shinobi: batalhas ninja em tempo real."""
