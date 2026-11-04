@@ -21,6 +21,11 @@ _fontes: dict[tuple[int, bool], pygame.font.Font] = {}
 _sombras: dict[tuple[int, int], pygame.Surface] = {}
 
 
+def limpar_cache() -> None:
+    """Esquece fontes guardadas (elas param de funcionar se o pygame for reiniciado)."""
+    _fontes.clear()
+
+
 def fonte(tamanho: int, negrito: bool = False) -> pygame.font.Font:
     chave = (tamanho, negrito)
     if chave not in _fontes:

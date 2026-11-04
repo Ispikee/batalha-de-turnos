@@ -51,6 +51,30 @@ Batalhas ninja **em tempo real**, feitas em **Python + Pygame**. Monte um time d
 
 Na escolha de time: clique nos cartões (ou use as setas + Espaço, ou as teclas 1–6), **Tab** muda a dificuldade, **R** sorteia um time e **Enter** começa a luta.
 
+## Jogar online contra um amigo
+
+Cada um joga no seu PC. Um **cria a partida** e o outro **entra** digitando o IP de quem criou.
+
+**Antes de tudo:** os dois precisam ter o jogo instalado (veja "Como rodar" abaixo) e **na mesma versão**. Quem não usa Git pode baixar em **Code → Download ZIP** na página do repositório no GitHub.
+
+### Na mesma casa (mesmo Wi-Fi)
+1. Um abre o jogo e escolhe **Criar partida online**. A tela mostra o IP dele, por exemplo `192.168.0.15`.
+2. O outro escolhe **Entrar em partida online**, digita esse IP e aperta Enter.
+3. Os dois escolhem o time e apertam **PRONTO!** A luta começa quando os dois estiverem prontos.
+
+### Pela internet (cada um na sua casa)
+O jeito mais fácil é o **[Radmin VPN](https://www.radmin-vpn.com/)** (grátis): ele faz os dois PCs parecerem estar na mesma rede.
+1. Os dois instalam o Radmin VPN.
+2. Um clica em **Rede → Criar rede** (escolhe um nome e uma senha). O outro clica em **Rede → Entrar na rede** com esse nome e senha.
+3. Quem criou a rede abre o jogo em **Criar partida online**. Vai aparecer um IP que começa com **26.** (é o do Radmin).
+4. O outro entra com esse IP `26.x.x.x`.
+
+> **Windows perguntou sobre o firewall?** Na primeira vez que você cria uma partida, o Windows pergunta se o Python pode usar a rede. Clique em **Permitir acesso** e marque **redes privadas e públicas** (a rede do Radmin costuma ser "pública"). Se você clicou em Cancelar sem querer, procure "Permitir um aplicativo pelo Firewall do Windows" no menu Iniciar e marque o Python.
+
+Outras opções: [ZeroTier](https://www.zerotier.com/) ou [Tailscale](https://tailscale.com/) funcionam do mesmo jeito (usem o IP que eles mostram). Sem VPN, quem cria a partida precisa abrir a **porta 5050 (TCP)** no roteador.
+
+**Como funciona por dentro:** quem cria a partida roda as regras da luta; o PC do amigo manda os comandos dele (andar, mirar, jutsus) e desenha o que recebe. Cada um se vê do lado esquerdo: no PC do amigo a arena aparece girada. Online a luta não pausa: o **P** abre o menu, mas seu ninja fica parado apanhando. No fim, **R** pede revanche (os dois precisam apertar) e **Enter** leva os dois de volta para a escolha de time.
+
 ## Como rodar no VS Code
 
 **Precisa ter:** [Python 3.10 a 3.13](https://www.python.org/downloads/) (no Windows, marque *"Add python.exe to PATH"* na instalação), [VS Code](https://code.visualstudio.com/) e [Git](https://git-scm.com/downloads).
@@ -84,7 +108,7 @@ Se o VS Code perguntar qual interpretador usar, escolha o que tem `.venv` no cam
 pytest
 ```
 
-Os testes conferem as regras (dano, naturezas, recargas, trocas, terreno), colocam duas IAs para lutar entre si até o fim e passam por todas as telas sem abrir janela. Também dá para rodar pela aba **Testes** (ícone de frasco) do VS Code.
+Os testes conferem as regras (dano, naturezas, recargas, trocas, terreno), colocam duas IAs para lutar entre si até o fim, passam por todas as telas sem abrir janela e simulam uma partida online inteira entre dois jogos no mesmo PC. Também dá para rodar pela aba **Testes** (ícone de frasco) do VS Code.
 
 ## Estrutura
 
@@ -102,7 +126,10 @@ batalha-de-turnos/
 │   ├── tela_titulo.py    # tela inicial
 │   ├── tela_selecao.py   # escolha do time
 │   ├── tela_batalha.py   # a luta: controles, efeitos e painéis
-│   ├── interface.py      # janela e troca entre telas
+│   ├── tela_online.py    # criar partida / entrar pelo IP
+│   ├── rede.py           # conexão entre os dois PCs (TCP)
+│   ├── online.py         # o que os PCs trocam: comandos e estado da luta
+│   ├── interface.py      # janela, troca entre telas e mensagens online
 │   └── config.py         # tamanho da janela, cores
 ├── tests/                # testes automáticos
 ├── requirements.txt
@@ -117,7 +144,8 @@ As **regras** (`combate.py`, `ia.py`, `ninjas.py`...) não desenham nada, e as *
 - Mais ninjas e jutsus (é só adicionar em `jogo/ninjas.py`)
 - Habilidades passivas, itens de uso rápido, clima (chuva fortalece Água, por exemplo)
 - Mapa para explorar, recrutar ninjas e enfrentar mestres em sequência
-- 2 jogadores no mesmo PC ou online
+- 2 jogadores no mesmo PC (teclado dividido ou controle)
+- Gerar um .exe com PyInstaller para o amigo jogar sem instalar Python
 - Sons com `pygame.mixer`
 
 ---

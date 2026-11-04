@@ -19,9 +19,13 @@ COLUNAS = 3
 
 
 class TelaSelecao:
-    def __init__(self, escolhidos: list[int] | None = None, dificuldade: int = 1):
+    """Com `sessao` (partida online), o botão vira "PRONTO!" e mostra se o amigo já escolheu."""
+
+    def __init__(self, escolhidos: list[int] | None = None, dificuldade: int = 1, sessao=None):
         self.escolhidos: list[int] = list(escolhidos or [])
         self.dificuldade = dificuldade
+        self.sessao = sessao
+        self.online = sessao is not None
         self.cursor = self.escolhidos[0] if self.escolhidos else 0
         self.tempo = 0.0
         self.fundo = gradiente(cfg.LARGURA, cfg.ALTURA, (18, 20, 34), (40, 28, 55))
@@ -54,8 +58,19 @@ class TelaSelecao:
     def mudar_dificuldade(self, passo: int) -> None:
         self.dificuldade = (self.dificuldade + passo) % len(DIFICULDADES)
 
+    @property
+    def aguardando(self) -> bool:
+        """Online: já apertou PRONTO e está esperando o amigo."""
+        return self.online and self.sessao.pronto
+
     # ---- Entrada --------------------------------------------------------------
     def evento(self, e) -> str | None:
+        if self.aguardando:  # time travado: só dá para cancelar ou sair
+            if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+                return "sair_online"
+            cancelar = (e.type == pygame.KEYDOWN and e.key in (pygame.K_BACKSPACE, pygame.K_RETURN, pygame.K_KP_ENTER)) or (
+                e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and self.botao_lutar.collidepoint(e.pos))
+            return "cancelar_pronto" if cancelar else None
         if e.type == pygame.MOUSEMOTION:
             for i, cartao in enumerate(self.cartoes):
                 if cartao.collidepoint(e.pos):
@@ -64,9 +79,9 @@ class TelaSelecao:
             for i, cartao in enumerate(self.cartoes):
                 if cartao.collidepoint(e.pos):
                     self.alternar(i)
-            if self.botao_menos.collidepoint(e.pos):
+            if self.botao_menos.collidepoint(e.pos) and not self.online:
                 self.mudar_dificuldade(-1)
-            elif self.botao_mais.collidepoint(e.pos):
+            elif self.botao_mais.collidepoint(e.pos) and not self.online:
                 self.mudar_dificuldade(1)
             elif self.botao_aleatorio.collidepoint(e.pos):
                 self.aleatorio()
@@ -75,7 +90,7 @@ class TelaSelecao:
         elif e.type == pygame.KEYDOWN:
             total = len(ROSTER)
             if e.key == pygame.K_ESCAPE:
-                return "titulo"
+                return "sair_online" if self.online else "titulo"
             if e.key in (pygame.K_LEFT, pygame.K_a):
                 self.cursor = (self.cursor - 1) % total
             elif e.key in (pygame.K_RIGHT, pygame.K_d):
@@ -92,7 +107,7 @@ class TelaSelecao:
                 self.escolhidos.pop()
             elif e.key == pygame.K_r:
                 self.aleatorio()
-            elif e.key == pygame.K_TAB:
+            elif e.key == pygame.K_TAB and not self.online:
                 self.mudar_dificuldade(1)
             elif pygame.K_1 <= e.key < pygame.K_1 + total:
                 self.alternar(e.key - pygame.K_1)
@@ -104,8 +119,10 @@ class TelaSelecao:
     # ---- Desenho --------------------------------------------------------------
     def desenhar(self, tela: pygame.Surface) -> None:
         tela.blit(self.fundo, (0, 0))
-        escrever(tela, "Escolha seu time", 34, cfg.BRANCO, negrito=True, topleft=(40, 14))
-        escrever(tela, "Clique ou Espaço para escolher 3 ninjas · o primeiro começa a luta · Enter para lutar",
+        titulo = "Escolha seu time  ·  online" if self.online else "Escolha seu time"
+        escrever(tela, titulo, 34, cfg.BRANCO, negrito=True, topleft=(40, 14))
+        dica = "Enter quando estiver pronto · Esc sai da partida" if self.online else "Enter para lutar"
+        escrever(tela, f"Clique ou Espaço para escolher 3 ninjas · o primeiro começa a luta · {dica}",
                  16, cfg.CINZA_CLARO, topleft=(42, 54))
 
         painel(tela, self.botao_aleatorio, cor=cfg.PAINEL_CLARO)
@@ -183,6 +200,15 @@ class TelaSelecao:
     def desenhar_dificuldade(self, tela) -> None:
         r = self.area_dificuldade
         painel(tela, r)
+        if self.online:  # no lugar da dificuldade: como está o amigo
+            escrever(tela, "Seu amigo", 18, cfg.CINZA_CLARO, negrito=True, topleft=(r.x + 16, r.y + 8))
+            if self.sessao.amigo_pronto:
+                escrever(tela, "PRONTO!", 30, cfg.VERDE, negrito=True, center=(r.centerx, r.y + 62))
+                escrever(tela, "Esperando você...", 16, cfg.CINZA_CLARO, center=(r.centerx, r.y + 100))
+            else:
+                pontos = "." * (int(self.tempo * 2) % 4)
+                escrever(tela, f"escolhendo{pontos}", 26, cfg.AMARELO, negrito=True, center=(r.centerx, r.y + 70))
+            return
         escrever(tela, "Dificuldade (Tab)", 18, cfg.CINZA_CLARO, negrito=True, topleft=(r.x + 16, r.y + 8))
         for botao, seta in ((self.botao_menos, -1), (self.botao_mais, 1)):
             painel(tela, botao, cor=cfg.PAINEL_CLARO, raio=10)
@@ -194,10 +220,16 @@ class TelaSelecao:
 
     def desenhar_botao_lutar(self, tela) -> None:
         r = self.botao_lutar
-        if self.pronto:
+        if self.aguardando:
+            painel(tela, r, cor=cfg.PAINEL_CLARO, borda=cfg.VERDE, largura_borda=3)
+            pontos = "." * (int(self.tempo * 2) % 4)
+            escrever(tela, f"Esperando o amigo{pontos}", 26, cfg.BRANCO, negrito=True, center=(r.centerx, r.centery - 10))
+            escrever(tela, "Enter ou clique para mudar o time", 15, cfg.CINZA_CLARO, center=(r.centerx, r.bottom - 22))
+        elif self.pronto:
             brilho = (math.sin(self.tempo * 4) + 1) / 2
             painel(tela, r, cor=misturar((170, 60, 40), (215, 90, 50), brilho), borda=cfg.DOURADO, largura_borda=3)
-            escrever(tela, "LUTAR!", 44, cfg.BRANCO, negrito=True, center=(r.centerx, r.centery - 8))
+            escrever(tela, "PRONTO!" if self.online else "LUTAR!", 44, cfg.BRANCO, negrito=True,
+                     center=(r.centerx, r.centery - 8))
             escrever(tela, "Enter", 16, cfg.DOURADO, center=(r.centerx, r.bottom - 20))
         else:
             painel(tela, r, cor=cfg.PAINEL)
