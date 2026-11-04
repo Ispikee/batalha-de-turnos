@@ -25,6 +25,7 @@ ESQUIVA_DURACAO = 0.16
 ESQUIVA_VELOCIDADE = 950
 ESQUIVA_RECARGA = 1.1
 INVESTIDA_VELOCIDADE = 1100
+TROCA_DURACAO = 0.7  # tempo parado chamando o outro ninja (dá para levar golpes!)
 TROCA_RECARGA = 4.0
 INVULNERAVEL_AO_ENTRAR = 0.6
 ESPERA_APOS_NOCAUTE = 1.2
@@ -40,7 +41,7 @@ AGUA_RAPIDO = 1.2
 QUEIMADURA_POR_SEGUNDO = 0.02  # fração do HP máximo
 FORCA_EMPURRAO = 520
 ANGULO_CORPO = 75  # golpes corpo a corpo acertam até esse ângulo para cada lado
-FATOR_DANO = 1.0  # aumente para lutas mais rápidas
+FATOR_DANO = 0.8  # aumente para lutas mais rápidas
 # -----------------------------------------------------------------------------
 
 TEXTO_EFEITO = {
@@ -178,6 +179,12 @@ class Time:
         self.recarga_troca = 0.0
         self.espera_nocaute = 0.0
         self.escolha_apos_nocaute: int | None = None
+        self.troca_pendente: int | None = None  # ninja sendo chamado
+        self.tempo_troca = 0.0
+
+    @property
+    def trocando(self) -> bool:
+        return self.troca_pendente is not None
 
     @property
     def ativo(self) -> Lutador:
@@ -261,7 +268,8 @@ class Combate:
             return False
         if self.terminou or not lutador.vivo or lutador.atordoado or lutador.ocupado:
             return False
-        if self.times[lutador.lado].ativo is not lutador or self.times[lutador.lado].espera_nocaute > 0:
+        time = self.times[lutador.lado]
+        if time.ativo is not lutador or time.espera_nocaute > 0 or time.trocando:
             return False
         if lutador.trava > 0 or lutador.recargas[indice] > 0:
             return False
@@ -271,10 +279,14 @@ class Combate:
         return True
 
     def pode_esquivar(self, lutador: Lutador) -> bool:
+        if self.times[lutador.lado].trocando:
+            return False
         return lutador.vivo and not lutador.atordoado and not lutador.ocupado and lutador.recarga_esquiva <= 0
 
     def pode_trocar(self, time: Time, indice: int) -> bool:
         if self.terminou or not (0 <= indice < len(time.lutadores)) or indice == time.ativo_idx:
+            return False
+        if time.trocando:
             return False
         if not time.lutadores[indice].vivo:
             return False
@@ -345,9 +357,23 @@ class Combate:
             if direcao.length_squared() > 1:
                 eu.mira = direcao.normalize()
 
+        if time.trocando:  # parado, chamando o outro ninja
+            time.tempo_troca -= dt
+            if time.tempo_troca <= 0:
+                indice, time.troca_pendente = time.troca_pendente, None
+                if time.lutadores[indice].vivo:
+                    self._entrar(time, indice)
+                    time.recarga_troca = TROCA_RECARGA
+            else:
+                self._mover(eu, Vector2(), dt)
+            return
+
         if cmd.trocar is not None and self.pode_trocar(time, cmd.trocar):
-            self._entrar(time, cmd.trocar)
-            time.recarga_troca = TROCA_RECARGA
+            time.troca_pendente = cmd.trocar
+            time.tempo_troca = TROCA_DURACAO
+            self.eventos.append(Evento("trocando", eu.pos.copy(), texto=time.lutadores[cmd.trocar].nome,
+                                       natureza=time.lutadores[cmd.trocar].natureza, lado=time.lado))
+            self._mover(eu, Vector2(), dt)
             return
 
         if cmd.esquiva and self.pode_esquivar(eu):
@@ -546,6 +572,7 @@ class Combate:
             if not l.vivo and not l.nocaute_anunciado:
                 l.nocaute_anunciado = True
                 l.limpar_efeitos()
+                time.troca_pendente = None  # caiu antes de conseguir trocar
                 self.eventos.append(Evento("nocaute", l.pos.copy(), texto=l.nome, lado=time.lado))
                 if not time.derrotado:
                     time.espera_nocaute = ESPERA_APOS_NOCAUTE
@@ -567,4 +594,4 @@ class Combate:
         novo.limpar_efeitos()
         novo.invulneravel = INVULNERAVEL_AO_ENTRAR
         time.ativo_idx = indice
-        self.eventos.append(Evento("troca", novo.pos.copy(), texto=novo.nome, lado=time.lado))
+        self.eventos.append(Evento("troca", novo.pos.copy(), texto=novo.nome, natureza=novo.natureza, lado=time.lado))
