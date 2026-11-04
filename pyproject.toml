@@ -1,7 +1,7 @@
 [project]
 name = "batalha-de-turnos"
 version = "0.1.0"
-description = "Jogo de batalha por turnos feito com Python e Pygame"
+description = "Arena Shinobi: batalhas ninja em tempo real feitas com Python e Pygame"
 requires-python = ">=3.10"
 
 [tool.pytest.ini_options]

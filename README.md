@@ -1,25 +1,50 @@
-# Batalha de Turnos
+# Arena Shinobi
 
-Jogo de batalha por turnos feito em **Python + Pygame**. Você controla o Herói contra um Goblin: escolha uma ação, veja o inimigo responder e tente vencer antes que seu HP acabe.
+Batalhas ninja **em tempo real**, feitas em **Python + Pygame**. Monte um time de 3 ninjas, entre na arena e lute contra o time do computador: ande, mire, desvie e use os 4 jutsus de cada ninja. Quando um cai, o próximo entra. Vence quem derrubar o time inteiro do outro.
 
-## O que já funciona
+## Como funciona
 
-- 4 ações: **Atacar**, **Magia** (gasta MP, bate forte e ignora defesa), **Defender** (corta o próximo dano pela metade e recupera MP) e **Curar** (gasta MP)
-- Inimigo com uma IA simples (cura quando está fraco, às vezes usa magia ou defende)
-- Acertos críticos, barras de HP/MP animadas, números de dano subindo, registro da batalha
-- Tela de vitória/derrota com opção de jogar de novo
-- Testes automáticos das regras com `pytest`
+- **Tempo real:** nada de esperar a vez. Cada jutsu tem sua própria recarga.
+- **Naturezas de chakra:** cada ninja e cada jutsu têm uma natureza. Elas formam um ciclo:
+
+  **Água > Fogo > Vento > Terra > Raio > Água**
+
+  Golpe forte contra a natureza do rival causa **1,6×** de dano ("Super efetivo!"); contra a natureza que o vence, só **0,6×**. Neutro (taijutsu e armas) não tem vantagem nem fraqueza. Jutsus da mesma natureza do ninja batem 20% mais forte.
+  Na barra de jutsus, uma seta **verde** mostra que o golpe é forte contra o rival atual e uma **vermelha** que é fraco.
+- **Troca de ninja:** aperte 1, 2 ou 3 para trocar no meio da luta (tem recarga de 4 s). Trocar para quem tem vantagem é a principal estratégia.
+- **Tipos de jutsu:** projétil, leque (vários projéteis), corpo a corpo, investida, área (marca o chão e explode depois de um instante: dá para fugir!) e suporte (cura, escudo, velocidade, força).
+- **Efeitos:** queimadura (ninjas de Fogo são imunes), lentidão, atordoamento e empurrão.
+- **Esquiva:** um impulso rápido em que você fica invulnerável por um instante.
+- **Terreno:** pedras bloqueiam a passagem e os projéteis. Nos lagos, ninjas de Água ficam mais rápidos e os outros ficam lentos.
+- **IA** com 3 dificuldades: ela desvia, antecipa seu movimento, escolhe golpes super efetivos e troca de ninja quando está em desvantagem.
+
+## Os ninjas
+
+| Ninja | Natureza | Estilo |
+|---|---|---|
+| Kaen | Fogo | Ataca de longe e queima |
+| Mizuha | Água | Resistente, se cura, rápida na água |
+| Fuuga | Vento | O mais veloz, golpes rápidos |
+| Ganro | Terra | Lento, aguenta muito, bate pesado de perto |
+| Shiden | Raio | Muito dano e atordoamento |
+| Tetsu | Neutro | Taijutsu puro, sem fraquezas |
 
 ## Controles
 
 | Tecla | O que faz |
 |---|---|
-| Setas ↑/↓ ou W/S | Escolher ação |
-| Enter ou Espaço | Confirmar |
-| 1, 2, 3, 4 | Usar a ação direto |
-| Mouse | Passar por cima e clicar |
-| R | Jogar de novo (no fim da luta) |
-| Esc | Sair |
+| WASD ou setas | Andar |
+| Mouse | Mirar |
+| Clique esquerdo (ou J) | Jutsu 1 |
+| Clique direito (ou K) | Jutsu 2 |
+| Q | Jutsu 3 |
+| E | Jutsu 4 |
+| Espaço ou Shift | Esquivar |
+| 1, 2, 3 | Trocar de ninja |
+| P | Pausar |
+| Esc | Pausar / voltar |
+
+Na escolha de time: clique nos cartões (ou use as setas + Espaço, ou as teclas 1–6), **Tab** muda a dificuldade, **R** sorteia um time e **Enter** começa a luta.
 
 ## Como rodar no VS Code
 
@@ -54,32 +79,40 @@ Se o VS Code perguntar qual interpretador usar, escolha o que tem `.venv` no cam
 pytest
 ```
 
-Também dá para rodar pela aba **Testes** (ícone de frasco) do VS Code.
+Os testes conferem as regras (dano, naturezas, recargas, trocas, terreno), colocam duas IAs para lutar entre si até o fim e passam por todas as telas sem abrir janela. Também dá para rodar pela aba **Testes** (ícone de frasco) do VS Code.
 
 ## Estrutura
 
 ```
 batalha-de-turnos/
-├── main.py              # ponto de entrada
+├── main.py               # ponto de entrada
 ├── jogo/
-│   ├── batalha.py       # regras: dano, ações, IA do inimigo (sem Pygame)
-│   ├── personagem.py    # personagens e seus atributos
-│   ├── interface.py     # tela, desenho, teclado e mouse (Pygame)
-│   └── config.py        # tamanho da janela, cores, tempos
-├── tests/
-│   └── test_batalha.py  # testes das regras
+│   ├── naturezas.py      # naturezas de chakra e tabela de vantagens
+│   ├── jutsus.py         # como um jutsu é descrito (tipo, poder, recarga...)
+│   ├── ninjas.py         # os ninjas e seus jutsus  ← comece por aqui para criar ninjas
+│   ├── arena.py          # campo de batalha: pedras e lagos
+│   ├── combate.py        # regras da luta em tempo real (sem tela)
+│   ├── ia.py             # inteligência do rival e dificuldades
+│   ├── desenho.py        # funções de desenho (textos, barras, ninjas)
+│   ├── tela_titulo.py    # tela inicial
+│   ├── tela_selecao.py   # escolha do time
+│   ├── tela_batalha.py   # a luta: controles, efeitos e painéis
+│   ├── interface.py      # janela e troca entre telas
+│   └── config.py         # tamanho da janela, cores
+├── tests/                # testes automáticos
 ├── requirements.txt
-└── .vscode/             # configuração para rodar com F5
+└── .vscode/              # configuração para rodar com F5
 ```
 
-A ideia é manter **regras** (`batalha.py`, `personagem.py`) separadas da **tela** (`interface.py`). Assim você pode mudar o visual sem quebrar a lógica, e testar a lógica sem abrir janela.
+As **regras** (`combate.py`, `ia.py`, `ninjas.py`...) não desenham nada, e as **telas** só mostram o que acontece. Assim dá para mudar o visual sem quebrar a lógica e testar a lógica sem abrir janela.
 
 ## Ideias para continuar
 
-- Trocar as formas por sprites: carregue imagens com `pygame.image.load()` em `desenhar_lutador()`
-- Mais inimigos e uma sequência de lutas
-- Itens (poção, éter), status (veneno, atordoado), níveis e experiência
-- Times com vários personagens de cada lado
+- Trocar os desenhos por sprites: carregue imagens com `pygame.image.load()` em `desenhar_ninja()` (`jogo/desenho.py`)
+- Mais ninjas e jutsus (é só adicionar em `jogo/ninjas.py`)
+- Habilidades passivas, itens de uso rápido, clima (chuva fortalece Água, por exemplo)
+- Mapa para explorar, recrutar ninjas e enfrentar mestres em sequência
+- 2 jogadores no mesmo PC ou online
 - Sons com `pygame.mixer`
 
 ---
