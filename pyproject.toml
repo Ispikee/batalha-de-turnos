@@ -1,0 +1,9 @@
+[project]
+name = "batalha-de-turnos"
+version = "0.1.0"
+description = "Jogo de batalha por turnos feito com Python e Pygame"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
