@@ -49,11 +49,46 @@ def test_ia_nao_troca_logo_de_cara(dificuldade):
 def test_ia_dificil_troca_quando_esta_em_desvantagem():
     combate = Combate([ninja("Kaen")], [ninja("Fuuga"), ninja("Mizuha")], rng=random.Random(1))
     ia = IA(combate, 1, DIFICULDADES[2], random.Random(1))
+    kaen = combate.ativo(0)
     for _ in range(round(30 / DT)):
+        kaen.hp = kaen.hp_max  # ninguém controla o Kaen: mantém ele de pé para o teste
         combate.atualizar(DT, [None, ia.comando(DT)])
         if combate.times[1].ativo.nome == "Mizuha":
             break
     assert combate.times[1].ativo.nome == "Mizuha"
+
+
+@pytest.mark.parametrize("semente", range(3))
+def test_ia_anda_sem_ficar_indo_e_voltando(semente):
+    """Conta as meias-voltas da IA (fora investidas, esquivas e empurrões).
+    Antes da correção eram centenas por minuto e o movimento parecia travado."""
+    from pygame.math import Vector2
+
+    from jogo.combate import Comando
+
+    rng = random.Random(semente)
+    combate = Combate(rng.sample(ROSTER, 3), rng.sample(ROSTER, 3), rng=random.Random(semente))
+    ia = IA(combate, 1, DIFICULDADES[1], random.Random(semente))
+    velocidades = []
+    meias_voltas = 0
+    ignorar = 0  # depois de contar uma meia-volta, não conta a mesma de novo
+    for i in range(round(30 / DT)):
+        if combate.terminou:
+            break
+        jogador = Comando(mover=Vector2(1, 0).rotate(i * DT * 40))  # jogador andando em círculos
+        combate.atualizar(DT, [jogador, ia.comando(DT)])
+        eu = combate.ativo(1)
+        livre = not eu.ocupado and eu.empurrao.length() < 30
+        velocidades.append(eu.vel.copy() if livre else None)
+        ignorar -= 1
+        if len(velocidades) > 15 and ignorar <= 0:
+            antes, agora = velocidades[-16], velocidades[-1]  # um quarto de segundo de diferença
+            if antes and agora and antes.length() > 40 and agora.length() > 40:
+                if 140 < antes.angle_to(agora) % 360 < 220:
+                    meias_voltas += 1
+                    ignorar = 15
+    por_minuto = meias_voltas / (combate.tempo / 60)
+    assert por_minuto < 30, f"{por_minuto:.0f} meias-voltas por minuto"
 
 
 def test_ia_prefere_jutsu_super_efetivo():
