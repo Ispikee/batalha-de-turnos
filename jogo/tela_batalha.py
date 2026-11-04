@@ -26,6 +26,7 @@ from jogo.desenho import (
     selo_natureza,
 )
 from jogo.ia import IA, Dificuldade
+from jogo.online import ControleRemoto, SessaoOnline, aplicar_estado
 from jogo.jutsus import Efeito, Tipo
 from jogo.naturezas import COR, Natureza, multiplicador
 
@@ -107,13 +108,27 @@ def criar_fundo(arena: Arena) -> pygame.Surface:
 
 
 class TelaBatalha:
-    def __init__(self, time_jogador, time_inimigo, dificuldade: Dificuldade, semente: int | None = None):
+    """Modos: "ia" (contra o computador), "host" (criou a partida online: roda as regras)
+    e "cliente" (entrou na partida: só manda comandos e desenha o que o host manda)."""
+
+    def __init__(self, time_jogador, time_inimigo, dificuldade: Dificuldade | None = None,
+                 semente: int | None = None, sessao: SessaoOnline | None = None):
         self.time_jogador = list(time_jogador)
         self.time_inimigo = list(time_inimigo)
         self.dificuldade = dificuldade
+        self.sessao = sessao
+        self.modo = "ia" if sessao is None else ("host" if sessao.host else "cliente")
+        self.online = sessao is not None
+        self.nome_rival = "Seu amigo" if self.online else "O rival"
         rng = random.Random(semente)
         self.combate = Combate(self.time_jogador, self.time_inimigo, rng=rng)
-        self.ia = IA(self.combate, 1, dificuldade, random.Random(rng.random()))
+        if self.modo == "ia":
+            self.controle_rival = IA(self.combate, 1, dificuldade, random.Random(rng.random())).comando
+        elif self.modo == "host":
+            sessao.controle = ControleRemoto(self.combate, lado=1)
+            self.controle_rival = sessao.controle.comando
+        else:
+            self.controle_rival = None
         self.fundo = criar_fundo(self.combate.arena)
         self.camada_baixo = pygame.Surface((cfg.LARGURA, cfg.ALTURA), pygame.SRCALPHA)
         self.camada_cima = pygame.Surface((cfg.LARGURA, cfg.ALTURA), pygame.SRCALPHA)
@@ -142,12 +157,14 @@ class TelaBatalha:
             if self.fim_visivel:
                 if e.key == pygame.K_r:
                     return "revanche"
-                if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
+                if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                     return "menu"
+                if e.key == pygame.K_ESCAPE:
+                    return "sair_online" if self.online else "menu"
                 return None
             if e.key == pygame.K_ESCAPE:
                 if self.pausado:
-                    return "menu"
+                    return "sair_online" if self.online else "menu"
                 self.pausado = True
                 return None
             if e.key == pygame.K_p:
@@ -172,6 +189,8 @@ class TelaBatalha:
         return None
 
     def comando_jogador(self, dt: float) -> Comando:
+        if self.pausado:  # online a luta não para: com o menu aberto, seu ninja fica parado
+            return Comando()
         teclas = pygame.key.get_pressed()
         x = (teclas[pygame.K_d] or teclas[pygame.K_RIGHT]) - (teclas[pygame.K_a] or teclas[pygame.K_LEFT])
         y = (teclas[pygame.K_s] or teclas[pygame.K_DOWN]) - (teclas[pygame.K_w] or teclas[pygame.K_UP])
@@ -197,9 +216,11 @@ class TelaBatalha:
     # ---- Atualização ---------------------------------------------------------------
     def atualizar(self, dt: float) -> None:
         self.relogio += dt
-        if self.pausado:
+        if self.pausado and not self.online:
             return
         self.atualizar_visuais(dt)
+        if self.modo == "cliente":
+            self.receber_estados()
         if self.contagem > 0:
             self.contagem -= dt
             if self.contagem <= 0:
@@ -209,8 +230,22 @@ class TelaBatalha:
         if self.combate.terminou:
             self.tempo_fim += dt
             return
-        comandos = [self.comando_jogador(dt), self.ia.comando(dt)]
+        if self.modo == "cliente":
+            self.sessao.enviar_comando(self.comando_jogador(dt))
+            return
+        comandos = [self.comando_jogador(dt), self.controle_rival(dt)]
         self.combate.atualizar(dt, comandos)
+        if self.modo == "host":
+            self.sessao.enviar_estado(self.combate)  # antes de processar: leva os eventos junto
+        self.processar_eventos()
+
+    def receber_estados(self) -> None:
+        """Cliente: aplica o que o host mandou (todos os estados, para não perder nenhum evento)."""
+        estados, self.sessao.estados = self.sessao.estados, []
+        for estado in estados:
+            aplicar_estado(self.combate, estado)
+        if estados and self.contagem > 0 and self.combate.tempo > 0:
+            self.contagem, self.lutem = 0.0, 0.8  # o host já começou: acompanha
         self.processar_eventos()
 
     def atualizar_visuais(self, dt: float) -> None:
@@ -285,7 +320,7 @@ class TelaBatalha:
                 if ev.lado == 0:
                     self.anunciar(f"Chamando {ev.texto} ({natureza})...", cor)
                 else:
-                    self.anunciar(f"O rival está chamando {ev.texto} ({natureza})!", cor)
+                    self.anunciar(f"{self.nome_rival} está chamando {ev.texto} ({natureza})!", cor)
             elif ev.tipo == "troca":
                 self.estourar(ev.pos, (210, 210, 220), 26, velocidade=140, tamanho=10, vida=0.6)
                 cor = COR_JOGADOR if ev.lado == 0 else COR_INIMIGO
@@ -293,7 +328,7 @@ class TelaBatalha:
                 if ev.lado == 0:
                     self.anunciar(f"{ev.texto} ({natureza}) entra na luta!", cor)
                 else:
-                    self.anunciar(f"O rival manda {ev.texto} ({natureza})!", cor)
+                    self.anunciar(f"{self.nome_rival} manda {ev.texto} ({natureza})!", cor)
             elif ev.tipo == "nocaute":
                 self.estourar(ev.pos, cfg.CINZA_CLARO, 30, velocidade=220, tamanho=6, vida=0.7)
                 cor = COR_JOGADOR if ev.lado == 0 else COR_INIMIGO
@@ -656,10 +691,19 @@ class TelaBatalha:
     def desenhar_pausa(self, tela) -> None:
         self.veu(tela, 150)
         meio = cfg.LARGURA / 2
+        if self.online:
+            escrever(tela, "MENU", 80, cfg.BRANCO, negrito=True, center=(meio, cfg.ALTURA / 2 - 40))
+            escrever(tela, "A luta continua! Seu ninja está parado.", 22, cfg.AMARELO, negrito=True,
+                     center=(meio, cfg.ALTURA / 2 + 30))
+            escrever(tela, "P ou Enter: voltar para a luta  ·  Esc: sair da partida", 22, cfg.CINZA_CLARO,
+                     center=(meio, cfg.ALTURA / 2 + 70))
+            return
         escrever(tela, "PAUSADO", 80, cfg.BRANCO, negrito=True, center=(meio, cfg.ALTURA / 2 - 40))
-        escrever(tela, f"Dificuldade: {self.dificuldade.nome}", 20, cfg.CINZA_CLARO, center=(meio, cfg.ALTURA / 2 + 70))
         escrever(tela, "P ou Enter: continuar  ·  Esc: voltar para a escolha de time", 22, cfg.CINZA_CLARO,
                  center=(meio, cfg.ALTURA / 2 + 30))
+        if self.dificuldade is not None:
+            escrever(tela, f"Dificuldade: {self.dificuldade.nome}", 20, cfg.CINZA_CLARO,
+                     center=(meio, cfg.ALTURA / 2 + 70))
 
     def desenhar_fim(self, tela) -> None:
         self.veu(tela, 175)
@@ -683,5 +727,15 @@ class TelaBatalha:
             escrever(tela, f"{l.hp_inteiro}/{l.hp_max} HP", 15, cor_hp(l.fracao_hp) if l.vivo else cfg.CINZA,
                      center=(centro.x, centro.y + 72))
 
-        escrever(tela, "R: revanche  ·  Enter: escolher outro time", 24, cfg.CINZA_CLARO,
-                 center=(meio_x, meio_y + 170))
+        if not self.online:
+            escrever(tela, "R: revanche  ·  Enter: escolher outro time", 24, cfg.CINZA_CLARO,
+                     center=(meio_x, meio_y + 170))
+            return
+        if self.sessao.quero_revanche:
+            escrever(tela, "Esperando seu amigo aceitar a revanche...", 22, cfg.AMARELO, negrito=True,
+                     center=(meio_x, meio_y + 140))
+        elif self.sessao.amigo_quer_revanche:
+            escrever(tela, "Seu amigo quer revanche! Aperte R", 22, cfg.VERDE, negrito=True,
+                     center=(meio_x, meio_y + 140))
+        escrever(tela, "R: revanche  ·  Enter: os dois trocam de time  ·  Esc: sair", 22, cfg.CINZA_CLARO,
+                 center=(meio_x, meio_y + 180))
