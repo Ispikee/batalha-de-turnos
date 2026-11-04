@@ -13,7 +13,7 @@ from pygame.math import Vector2
 
 from jogo import config as cfg
 from jogo.arena import Arena
-from jogo.combate import ESQUIVA_RECARGA, TROCA_RECARGA, Combate, Comando, Lutador, Time
+from jogo.combate import ESQUIVA_RECARGA, TROCA_DURACAO, Combate, Comando, Lutador, Time
 from jogo.desenho import (
     barra,
     cor_hp,
@@ -121,7 +121,7 @@ class TelaBatalha:
         self.textos: list[TextoFlutuante] = []
         self.efeitos: list[Efeito2D] = []
         self.anuncio: tuple[str, tuple, float] | None = None
-        self.contagem = 2.1
+        self.contagem = 3.0
         self.lutem = 0.0
         self.pausado = False
         self.tempo_fim = 0.0
@@ -279,10 +279,21 @@ class TelaBatalha:
                 self.textos.append(TextoFlutuante(ev.texto, ev.pos + Vector2(0, -88), cor_nat, 18, 1.1))
             elif ev.tipo == "jutsu":
                 self.textos.append(TextoFlutuante(ev.texto, ev.pos + Vector2(0, -52), cor_nat, 16, 0.7, negrito=False))
+            elif ev.tipo == "trocando":
+                cor = COR_JOGADOR if ev.lado == 0 else COR_INIMIGO
+                natureza = ev.natureza.value if ev.natureza else ""
+                if ev.lado == 0:
+                    self.anunciar(f"Chamando {ev.texto} ({natureza})...", cor)
+                else:
+                    self.anunciar(f"O rival está chamando {ev.texto} ({natureza})!", cor)
             elif ev.tipo == "troca":
                 self.estourar(ev.pos, (210, 210, 220), 26, velocidade=140, tamanho=10, vida=0.6)
                 cor = COR_JOGADOR if ev.lado == 0 else COR_INIMIGO
-                self.anunciar(f"{ev.texto} entra na luta!" if ev.lado == 0 else f"O rival manda {ev.texto}!", cor)
+                natureza = ev.natureza.value if ev.natureza else ""
+                if ev.lado == 0:
+                    self.anunciar(f"{ev.texto} ({natureza}) entra na luta!", cor)
+                else:
+                    self.anunciar(f"O rival manda {ev.texto} ({natureza})!", cor)
             elif ev.tipo == "nocaute":
                 self.estourar(ev.pos, cfg.CINZA_CLARO, 30, velocidade=220, tamanho=6, vida=0.7)
                 cor = COR_JOGADOR if ev.lado == 0 else COR_INIMIGO
@@ -309,7 +320,7 @@ class TelaBatalha:
         lutadores = [(time, time.ativo) for time in self.combate.times
                      if time.ativo.vivo or time.espera_nocaute > 0 or self.combate.terminou]
         for time, l in lutadores:
-            self.desenhar_marcas_no_chao(l)
+            self.desenhar_marcas_no_chao(time, l)
         self.desenhar_mira()
         tela.blit(self.camada_baixo, (0, 0))
 
@@ -344,7 +355,7 @@ class TelaBatalha:
             if area.restante < 0.2 and int(self.relogio * 30) % 2 == 0:
                 pygame.draw.circle(self.camada_baixo, (255, 255, 255, 90), area.pos, raio)
 
-    def desenhar_marcas_no_chao(self, l: Lutador) -> None:
+    def desenhar_marcas_no_chao(self, time: Time, l: Lutador) -> None:
         cor = COR_JOGADOR if l.lado == 0 else COR_INIMIGO
         if not l.vivo:
             return
@@ -352,6 +363,14 @@ class TelaBatalha:
         pygame.draw.circle(self.camada_baixo, (*cor, 110), l.pos + Vector2(0, 4), 34, 2)
         if l.tem(Efeito.LENTIDAO):
             pygame.draw.circle(self.camada_baixo, (90, 160, 255, 90), l.pos + Vector2(0, 4), 30)
+        if time.trocando:  # círculo enchendo enquanto chama o outro ninja
+            novo = time.lutadores[time.troca_pendente]
+            progresso = 1 - time.tempo_troca / TROCA_DURACAO
+            caixa = pygame.Rect(0, 0, 84, 84)
+            caixa.center = l.pos
+            pygame.draw.circle(self.camada_baixo, (*COR[novo.natureza], 50), l.pos, 42)
+            pygame.draw.arc(self.camada_baixo, (*COR[novo.natureza], 255), caixa,
+                            math.pi / 2, math.pi / 2 + math.tau * progresso, 5)
 
     def desenhar_mira(self) -> None:
         eu = self.combate.ativo(0)
@@ -433,10 +452,47 @@ class TelaBatalha:
     def desenhar_hud(self, tela) -> None:
         self.desenhar_painel_time(tela, self.combate.times[0], pygame.Rect(16, 8, 520, 78), espelhado=False)
         self.desenhar_painel_time(tela, self.combate.times[1], pygame.Rect(cfg.LARGURA - 536, 8, 520, 78), espelhado=True)
+        meio = cfg.LARGURA / 2
         minutos, segundos = divmod(int(self.combate.tempo), 60)
-        escrever(tela, f"{minutos}:{segundos:02d}", 26, cfg.BRANCO, negrito=True, center=(cfg.LARGURA / 2, 32))
-        escrever(tela, self.dificuldade.nome, 15, cfg.CINZA_CLARO, center=(cfg.LARGURA / 2, 62))
+        escrever(tela, f"{minutos}:{segundos:02d}", 24, cfg.BRANCO, negrito=True, center=(meio, 22))
+
+        confronto = self.confronto()
+        if confronto is not None:
+            texto, cor, _ = confronto
+            largura = fonte(15, True).size(texto)[0] + 24
+            pilula = pygame.Rect(0, 0, largura, 24)
+            pilula.center = (meio, 50)
+            pygame.draw.rect(tela, escurecer(cor, 0.55), pilula, border_radius=12)
+            pygame.draw.rect(tela, cor, pilula, 2, border_radius=12)
+            escrever(tela, texto, 15, cor, negrito=True, sombra=False, center=pilula.center)
+            dica = self.dica_de_troca()
+            if dica:
+                escrever(tela, dica, 13, cfg.AMARELO, negrito=True, center=(meio, 76))
         self.desenhar_barra_jutsus(tela)
+
+    def confronto(self) -> tuple[str, tuple, str] | None:
+        """Quem tem vantagem de natureza agora: (texto curto, cor, explicação)."""
+        eu, rival = self.combate.ativo(0), self.combate.ativo(1)
+        if not (eu.vivo and rival.vivo):
+            return None
+        if multiplicador(eu.natureza, rival.natureza) > 1:
+            return "Vantagem sua!", cfg.VERDE, f"{eu.natureza.value} é forte contra {rival.natureza.value}: aproveite!"
+        if multiplicador(rival.natureza, eu.natureza) > 1:
+            return ("Desvantagem!", cfg.VERMELHO,
+                    f"{rival.natureza.value} é forte contra {eu.natureza.value}: troque de ninja com 1, 2 ou 3!")
+        return "Equilibrado", cfg.CINZA_CLARO, "Ninguém tem vantagem de natureza."
+
+    def dica_de_troca(self) -> str | None:
+        """Se você está em desvantagem, sugere um ninja do time melhor contra o rival."""
+        time = self.combate.times[0]
+        eu, rival = time.ativo, self.combate.ativo(1)
+        if not (eu.vivo and rival.vivo) or time.trocando or multiplicador(rival.natureza, eu.natureza) <= 1:
+            return None
+        opcoes = [i for i in time.reservas() if multiplicador(rival.natureza, time.lutadores[i].natureza) <= 1]
+        if not opcoes:
+            return None
+        melhor = max(opcoes, key=lambda i: multiplicador(time.lutadores[i].natureza, rival.natureza))
+        return f"Dica: tecla {melhor + 1} ({time.lutadores[melhor].nome})"
 
     def desenhar_painel_time(self, tela, time: Time, r: pygame.Rect, espelhado: bool) -> None:
         l = time.ativo
@@ -565,12 +621,32 @@ class TelaBatalha:
 
     def desenhar_contagem(self, tela) -> None:
         if self.contagem > 0:
-            numero = 3 if self.contagem > 1.4 else 2 if self.contagem > 0.7 else 1
-            fase = (self.contagem % 0.7) / 0.7
-            escrever(tela, str(numero), int(90 + 60 * fase), cfg.BRANCO, negrito=True, center=(cfg.LARGURA / 2, cfg.ALTURA / 2 - 20))
+            self.desenhar_apresentacao(tela)
+            numero = math.ceil(self.contagem)
+            fase = self.contagem % 1
+            escrever(tela, str(numero), int(70 + 50 * fase), cfg.BRANCO, negrito=True, center=(cfg.LARGURA / 2, 460))
         else:
             alfa = int(255 * min(1.0, self.lutem / 0.3))
             escrever(tela, "LUTEM!", 96, cfg.DOURADO, negrito=True, alfa=alfa, center=(cfg.LARGURA / 2, cfg.ALTURA / 2 - 20))
+
+    def desenhar_apresentacao(self, tela) -> None:
+        """Antes da luta: quem enfrenta quem e quem tem vantagem."""
+        eu, rival = self.combate.ativo(0), self.combate.ativo(1)
+        caixa = pygame.Rect(0, 0, 700, 200)
+        caixa.center = (cfg.LARGURA / 2, 270)
+        painel(tela, caixa, borda=cfg.BORDA, largura_borda=3)
+        for l, x, olhar, cor_lado in ((eu, caixa.x + 120, 1, COR_JOGADOR), (rival, caixa.right - 120, -1, COR_INIMIGO)):
+            pygame.draw.circle(tela, escurecer(COR[l.natureza], 0.55), (x, caixa.y + 70), 44)
+            pygame.draw.circle(tela, cor_lado, (x, caixa.y + 70), 44, 3)
+            desenhar_ninja(tela, l.base, (x, caixa.y + 70), Vector2(olhar, 0.3), self.relogio, escala=1.5)
+            escrever(tela, l.nome, 22, cfg.BRANCO, negrito=True, center=(x, caixa.y + 132))
+            selo_natureza(tela, l.natureza, 14, midtop=(x, caixa.y + 146))
+        escrever(tela, "VS", 52, cfg.DOURADO, negrito=True, center=(caixa.centerx, caixa.y + 70))
+        confronto = self.confronto()
+        if confronto is not None:
+            texto, cor, explicacao = confronto
+            escrever(tela, texto, 22, cor, negrito=True, center=(caixa.centerx, caixa.y + 128))
+            escrever(tela, explicacao, 15, cfg.CINZA_CLARO, center=(caixa.centerx, caixa.y + 156))
 
     def veu(self, tela, alfa: int = 170) -> None:
         cobertura = pygame.Surface((cfg.LARGURA, cfg.ALTURA), pygame.SRCALPHA)
@@ -581,6 +657,7 @@ class TelaBatalha:
         self.veu(tela, 150)
         meio = cfg.LARGURA / 2
         escrever(tela, "PAUSADO", 80, cfg.BRANCO, negrito=True, center=(meio, cfg.ALTURA / 2 - 40))
+        escrever(tela, f"Dificuldade: {self.dificuldade.nome}", 20, cfg.CINZA_CLARO, center=(meio, cfg.ALTURA / 2 + 70))
         escrever(tela, "P ou Enter: continuar  ·  Esc: voltar para a escolha de time", 22, cfg.CINZA_CLARO,
                  center=(meio, cfg.ALTURA / 2 + 30))
 

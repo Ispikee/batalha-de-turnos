@@ -10,13 +10,18 @@ Batalhas ninja **em tempo real**, feitas em **Python + Pygame**. Monte um time d
   **Água > Fogo > Vento > Terra > Raio > Água**
 
   Golpe forte contra a natureza do rival causa **1,6×** de dano ("Super efetivo!"); contra a natureza que o vence, só **0,6×**. Neutro (taijutsu e armas) não tem vantagem nem fraqueza. Jutsus da mesma natureza do ninja batem 20% mais forte.
-  Na barra de jutsus, uma seta **verde** mostra que o golpe é forte contra o rival atual e uma **vermelha** que é fraco.
-- **Troca de ninja:** aperte 1, 2 ou 3 para trocar no meio da luta (tem recarga de 4 s). Trocar para quem tem vantagem é a principal estratégia.
+  No topo da tela aparece se você está em **Vantagem**, **Desvantagem** ou **Equilibrado** (com a dica de qual ninja chamar), e na barra de jutsus uma seta **verde** mostra que o golpe é forte contra o rival atual e uma **vermelha** que é fraco.
+- **Troca de ninja:** aperte 1, 2 ou 3 para trocar no meio da luta. Chamar o outro ninja leva 0,7 s, em que você fica parado e pode levar golpes, e depois a troca tem recarga de 4 s. Vale para o rival também: quando ele começa a trocar, aparece um aviso e um círculo enchendo em volta dele.
 - **Tipos de jutsu:** projétil, leque (vários projéteis), corpo a corpo, investida, área (marca o chão e explode depois de um instante: dá para fugir!) e suporte (cura, escudo, velocidade, força).
 - **Efeitos:** queimadura (ninjas de Fogo são imunes), lentidão, atordoamento e empurrão.
 - **Esquiva:** um impulso rápido em que você fica invulnerável por um instante.
 - **Terreno:** pedras bloqueiam a passagem e os projéteis. Nos lagos, ninjas de Água ficam mais rápidos e os outros ficam lentos.
-- **IA** com 3 dificuldades: ela desvia, antecipa seu movimento, escolhe golpes super efetivos e troca de ninja quando está em desvantagem.
+- **IA** com 3 dificuldades:
+  - **Fácil:** lenta, erra bastante a mira, não desvia e não troca de ninja para te contrariar.
+  - **Normal:** desvia às vezes e só pensa em trocar depois que seu ninja está 10 s em campo.
+  - **Difícil:** reage rápido, antecipa seu movimento, desvia bem e troca depois de 5 s.
+
+  Os valores ficam em `DIFICULDADES`, no topo de `jogo/ia.py`.
 
 ## Os ninjas
 

@@ -10,11 +10,12 @@ from jogo.ninjas import ROSTER, ninja
 DT = 1 / 60
 
 
-@pytest.mark.parametrize("semente", range(4))
-def test_ia_contra_ia_sempre_termina(semente):
+@pytest.mark.parametrize("dificuldade", DIFICULDADES, ids=lambda d: d.nome)
+@pytest.mark.parametrize("semente", range(3))
+def test_ia_contra_ia_sempre_termina(semente, dificuldade):
     rng = random.Random(semente)
     combate = Combate(rng.sample(ROSTER, 3), rng.sample(ROSTER, 3), rng=random.Random(semente))
-    ias = [IA(combate, lado, DIFICULDADES[1], random.Random(semente * 10 + lado)) for lado in (0, 1)]
+    ias = [IA(combate, lado, dificuldade, random.Random(semente * 10 + lado)) for lado in (0, 1)]
     for _ in range(round(300 / DT)):
         if combate.terminou:
             break
@@ -30,6 +31,29 @@ def test_ia_ataca_um_alvo_parado():
     for _ in range(round(8 / DT)):
         combate.atualizar(DT, [None, ia.comando(DT)])
     assert alvo.hp < alvo.hp_max
+
+
+@pytest.mark.parametrize("dificuldade", DIFICULDADES, ids=lambda d: d.nome)
+def test_ia_nao_troca_logo_de_cara(dificuldade):
+    # Você entra com Kaen (Fogo) contra Fuuga (Vento): vantagem sua.
+    # A IA tem Mizuha (Água) no banco, mas precisa dar um tempo antes de trocar.
+    combate = Combate([ninja("Kaen")], [ninja("Fuuga"), ninja("Mizuha")], rng=random.Random(1))
+    ia = IA(combate, 1, dificuldade, random.Random(1))
+    espera = min(dificuldade.tempo_para_trocar, 30) - 0.5
+    for _ in range(round(espera / DT)):
+        combate.atualizar(DT, [None, ia.comando(DT)])
+    assert combate.times[1].ativo.nome == "Fuuga"
+    assert not combate.times[1].trocando
+
+
+def test_ia_dificil_troca_quando_esta_em_desvantagem():
+    combate = Combate([ninja("Kaen")], [ninja("Fuuga"), ninja("Mizuha")], rng=random.Random(1))
+    ia = IA(combate, 1, DIFICULDADES[2], random.Random(1))
+    for _ in range(round(30 / DT)):
+        combate.atualizar(DT, [None, ia.comando(DT)])
+        if combate.times[1].ativo.nome == "Mizuha":
+            break
+    assert combate.times[1].ativo.nome == "Mizuha"
 
 
 def test_ia_prefere_jutsu_super_efetivo():

@@ -25,13 +25,20 @@ class Dificuldade:
     chance_esquiva: float  # chance de usar a esquiva quando percebe
     antecipacao: float  # 0 = mira onde você está; 1 = mira onde você vai estar
     chance_troca: float  # chance de trocar quando está em desvantagem
+    movimento: float  # 1 = anda na velocidade total do ninja
+    tempo_para_trocar: float  # segundos que seu ninja precisa estar em campo antes da IA pensar em trocar
 
 
 DIFICULDADES = (
-    Dificuldade("Fácil", reacao=1.0, erro_mira=16, percepcao=0.35, chance_esquiva=0.1, antecipacao=0.2, chance_troca=0.2),
-    Dificuldade("Normal", reacao=0.6, erro_mira=8, percepcao=0.65, chance_esquiva=0.3, antecipacao=0.6, chance_troca=0.5),
-    Dificuldade("Difícil", reacao=0.3, erro_mira=3, percepcao=0.9, chance_esquiva=0.6, antecipacao=1.0, chance_troca=0.85),
+    Dificuldade("Fácil", reacao=1.6, erro_mira=22, percepcao=0.2, chance_esquiva=0.0, antecipacao=0.0,
+                chance_troca=0.0, movimento=0.65, tempo_para_trocar=999),
+    Dificuldade("Normal", reacao=1.1, erro_mira=13, percepcao=0.45, chance_esquiva=0.12, antecipacao=0.35,
+                chance_troca=0.35, movimento=0.8, tempo_para_trocar=10),
+    Dificuldade("Difícil", reacao=0.55, erro_mira=6, percepcao=0.75, chance_esquiva=0.35, antecipacao=0.8,
+                chance_troca=0.7, movimento=1.0, tempo_para_trocar=5),
 )
+
+TEMPO_MINIMO_EM_CAMPO = 6.0  # a IA não troca um ninja que acabou de entrar
 
 
 class IA:
@@ -41,8 +48,21 @@ class IA:
         self.lado = lado
         self.dif = dificuldade
         self.rng = rng or random.Random()
-        self.espera_ataque = 0.8
-        self.espera_troca = 3.0
+        self.espera_ataque = 1.5
+        self.espera_troca = 1.5
+        self.rival_visto: Lutador | None = None
+        self.tempo_com_rival = 0.0  # há quanto tempo o ninja do jogador está em campo
+        self.meu_visto: Lutador | None = None
+        self.tempo_em_campo = 0.0
+        self.escolha_nocaute: int | None = None
+
+    def contar_tempo_em_campo(self, dt: float, eu: Lutador, rival: Lutador) -> None:
+        if rival is not self.rival_visto:
+            self.rival_visto, self.tempo_com_rival = rival, 0.0
+        if eu is not self.meu_visto:
+            self.meu_visto, self.tempo_em_campo = eu, 0.0
+        self.tempo_com_rival += dt
+        self.tempo_em_campo += dt
         self.giro = 1 if self.rng.random() < 0.5 else -1
         self.tempo_giro = 1.5
         self.tempo_preso = 0.0
@@ -56,11 +76,17 @@ class IA:
         alvo = self.combate.oponente(self.lado)
         if self.combate.terminou:
             return c
+        self.contar_tempo_em_campo(dt, time.ativo, alvo)
         if time.espera_nocaute > 0:
-            c.trocar = self.melhor_reserva(time, alvo)
+            if self.escolha_nocaute is None:  # decide uma vez só quem entra
+                melhor = self.melhor_reserva(time, alvo)
+                acerta = self.rng.random() < self.dif.chance_troca
+                self.escolha_nocaute = melhor if acerta else self.rng.choice(time.reservas())
+            c.trocar = self.escolha_nocaute
             return c
+        self.escolha_nocaute = None
         eu = time.ativo
-        if not eu.vivo:
+        if not eu.vivo or time.trocando:
             return c
 
         troca = self.quer_trocar(dt, time, eu, alvo)
@@ -70,6 +96,7 @@ class IA:
 
         if not self.desviar(eu, c):
             c.mover = self.posicionar(dt, eu, alvo)
+        c.mover *= self.dif.movimento
 
         indice = self.escolher_jutsu(dt, eu, alvo) if alvo.vivo else None
         jutsu = eu.base.jutsus[indice] if indice is not None else None
@@ -261,13 +288,17 @@ class IA:
         if self.espera_troca > 0 or not alvo.vivo:
             return None
         self.espera_troca = 1.5
+        if self.tempo_em_campo < TEMPO_MINIMO_EM_CAMPO:
+            return None
         melhor = self.melhor_reserva(time, alvo)
         if melhor is None or not self.combate.pode_trocar(time, melhor):
             return None
         reserva = time.lutadores[melhor]
-        ganho = self.vantagem(reserva, alvo) - self.vantagem(eu, alvo)
-        if ganho >= 0.8 and self.rng.random() < self.dif.chance_troca:
-            return melhor
+        # só reage ao seu ninja depois de um tempo: dá para você aproveitar a vantagem
+        if self.tempo_com_rival >= self.dif.tempo_para_trocar:
+            ganho = self.vantagem(reserva, alvo) - self.vantagem(eu, alvo)
+            if ganho >= 0.8 and self.rng.random() < self.dif.chance_troca:
+                return melhor
         if eu.fracao_hp < 0.2 and reserva.fracao_hp > 0.5 and self.rng.random() < 0.3:
             return melhor
         return None

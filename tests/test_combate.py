@@ -8,6 +8,7 @@ from pygame.math import Vector2
 from jogo.combate import (
     ESPERA_APOS_NOCAUTE,
     QUEIMADURA_POR_SEGUNDO,
+    TROCA_DURACAO,
     Combate,
     Comando,
 )
@@ -175,16 +176,32 @@ def test_esquiva_deixa_invulneravel_e_move_rapido():
 
 
 # ---- Trocas e nocaute ----------------------------------------------------------------
-def test_trocar_de_ninja():
+def test_trocar_de_ninja_leva_um_tempo():
     combate = novo_combate()
     time = combate.times[0]
     pos = time.ativo.pos.copy()
     combate.atualizar(DT, [Comando(trocar=2), Comando()])
+    assert time.ativo_idx == 0 and time.trocando  # ainda chamando
+    assert not combate.pode_usar(time.ativo, 0)  # nem dá para atacar enquanto troca
+    rodar(combate, TROCA_DURACAO / 2, a=lambda: Comando(mover=Vector2(1, 0)))
+    assert time.ativo.pos == pos  # fica parado
+
+    rodar(combate, TROCA_DURACAO / 2 + 0.05)
     assert time.ativo_idx == 2
     assert time.ativo.pos == pos
     assert time.recarga_troca > 0
     combate.atualizar(DT, [Comando(trocar=0), Comando()])
-    assert time.ativo_idx == 2  # ainda em recarga
+    assert time.ativo_idx == 2 and not time.trocando  # ainda em recarga
+
+
+def test_troca_e_cancelada_se_o_ninja_cair():
+    combate = novo_combate()
+    time = combate.times[0]
+    combate.atualizar(DT, [Comando(trocar=2), Comando()])
+    time.ativo.hp = 0
+    combate.atualizar(DT, [Comando(), Comando()])
+    assert not time.trocando
+    assert time.espera_nocaute > 0
 
 
 def test_nocaute_traz_o_proximo_ninja():
