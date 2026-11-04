@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from pygame.math import Vector2
 
+from jogo.arena import distancia_ponto_segmento
 from jogo.combate import INVESTIDA_VELOCIDADE, Combate, Comando, Lutador, Time
 from jogo.jutsus import Efeito, Jutsu, Tipo
 from jogo.naturezas import Natureza, multiplicador
@@ -55,6 +56,16 @@ class IA:
         self.meu_visto: Lutador | None = None
         self.tempo_em_campo = 0.0
         self.escolha_nocaute: int | None = None
+        self.giro = 1 if self.rng.random() < 0.5 else -1  # sentido em que anda em volta do rival
+        self.perto = False  # True = quer lutar corpo a corpo
+        self.tempo_modo = 0.0
+        self.destino: Vector2 | None = None
+        self.tempo_destino = 0.0
+        self.mover_suave = Vector2()
+        self.tempo_sem_ver = 0.0
+        self.tempo_preso = 0.0
+        self.ultima_pos: Vector2 | None = None
+        self.reacoes: dict[int, tuple[bool, bool]] = {}  # ataque -> (percebeu, vai esquivar)
 
     def contar_tempo_em_campo(self, dt: float, eu: Lutador, rival: Lutador) -> None:
         if rival is not self.rival_visto:
@@ -63,11 +74,6 @@ class IA:
             self.meu_visto, self.tempo_em_campo = eu, 0.0
         self.tempo_com_rival += dt
         self.tempo_em_campo += dt
-        self.giro = 1 if self.rng.random() < 0.5 else -1
-        self.tempo_giro = 1.5
-        self.tempo_preso = 0.0
-        self.ultima_pos: Vector2 | None = None
-        self.reacoes: dict[int, tuple[bool, bool]] = {}  # ataque -> (percebeu, vai esquivar)
 
     # ---- Comando do quadro -------------------------------------------------------
     def comando(self, dt: float) -> Comando:
@@ -94,7 +100,10 @@ class IA:
             c.trocar = troca
             return c
 
-        if not self.desviar(eu, c):
+        if self.desviar(eu, c):
+            self.mover_suave = Vector2(c.mover)  # depois de desviar, continua dali sem tranco
+            self.destino = None
+        else:
             c.mover = self.posicionar(dt, eu, alvo)
         c.mover *= self.dif.movimento
 
@@ -191,39 +200,99 @@ class IA:
         return 290 if melhor_longe else 200
 
     def posicionar(self, dt: float, eu: Lutador, alvo: Lutador) -> Vector2:
-        para_alvo = alvo.pos - eu.pos
-        distancia = para_alvo.length()
-        direcao = para_alvo / distancia if distancia > 1 else Vector2(1, 0)
-        desejada = self.distancia_desejada(eu, alvo)
+        """Para onde andar. A IA escolhe um ponto em volta do rival e vai até ele com calma,
+        em vez de recalcular a direção do zero a cada quadro (o que deixava o movimento tremido)."""
+        self.tempo_modo -= dt
+        if self.tempo_modo <= 0:  # só muda de ideia (perto/longe) de tempos em tempos
+            perto = self.distancia_desejada(eu, alvo) < 100
+            if perto != self.perto:
+                self.perto, self.destino = perto, None
+            self.tempo_modo = 1.5
 
-        self.tempo_giro -= dt
-        if self.tempo_giro <= 0:
-            self.giro *= -1
-            self.tempo_giro = self.rng.uniform(1.2, 3.0)
-        tangente = direcao.rotate(90) * self.giro
-
-        if distancia > desejada + 50:
-            mover = direcao + tangente * 0.35
-        elif distancia < desejada - 50:
-            mover = -direcao + tangente * 0.5
+        if self.combate.arena.linha_livre(eu.pos, alvo.pos, eu.raio):
+            self.tempo_sem_ver = 0.0
         else:
-            mover = tangente
+            self.tempo_sem_ver += dt
+            if self.tempo_sem_ver > 1.5:  # rodando em volta da pedra sem achar o rival: muda o plano
+                self.tempo_sem_ver = 0.0
+                if self.rng.random() < 0.5:
+                    self.giro *= -1
+                self.destino = None
 
-        if eu.natureza is not Natureza.AGUA:  # foge da água, que deixa lento
-            for lago in self.combate.arena.lagos:
-                fora = eu.pos - lago.centro
-                if 0 < fora.length() < lago.r + 60:
-                    mover += fora.normalize() * 0.9
+        if self.perto:  # corpo a corpo: vai direto no rival
+            encostado = eu.pos.distance_to(alvo.pos) < eu.raio + alvo.raio + 25
+            desejado = Vector2() if encostado else self.direcao_ate(eu, alvo.pos)
+        else:
+            self.tempo_destino -= dt
+            # escolhe o próximo ponto um pouco antes de chegar, para não frear e dar meia-volta
+            if (self.destino is None or self.tempo_destino <= 0 or self.preso(dt, eu)
+                    or eu.pos.distance_to(self.destino) < 50):
+                self.destino = self.novo_destino(eu, alvo)
+                self.tempo_destino = self.rng.uniform(2.0, 3.5)
+            desejado = self.direcao_ate(eu, self.destino)
 
-        if self.ultima_pos is not None and dt > 0 and eu.pos.distance_to(self.ultima_pos) < 40 * dt:
+        # aceleração suave: nada de virar 180° de um quadro para o outro
+        self.mover_suave += (desejado - self.mover_suave) * min(1.0, dt * 7)
+        return Vector2(self.mover_suave)
+
+    def direcao_ate(self, eu: Lutador, ponto: Vector2) -> Vector2:
+        """Direção para chegar em `ponto`, dando a volta se tiver uma pedra no meio do caminho."""
+        caminho = ponto - eu.pos
+        if caminho.length_squared() < 1:
+            return Vector2()
+        for pedra in self.combate.arena.pedras:
+            no_caminho = distancia_ponto_segmento(pedra.centro, eu.pos, ponto) < pedra.r + eu.raio
+            if no_caminho and eu.pos.distance_to(pedra.centro) < caminho.length():
+                lado = Vector2(-caminho.y, caminho.x).normalize()
+                desvio = (eu.pos - pedra.centro).dot(lado)
+                if abs(desvio) < 1:
+                    lado *= self.giro  # bem alinhado com a pedra: escolhe um lado
+                elif desvio < 0:
+                    lado = -lado  # contorna pelo lado onde já está
+                beirada = pedra.centro + lado * (pedra.r + eu.raio + 20)
+                return (beirada - eu.pos).normalize()
+        return caminho.normalize()
+
+    def novo_destino(self, eu: Lutador, alvo: Lutador) -> Vector2:
+        arena = self.combate.arena
+        tem_longe = any(j.tipo in (Tipo.PROJETIL, Tipo.LEQUE, Tipo.AREA) for j in eu.base.jutsus)
+        desejada = 290 if tem_longe else 200
+        de_alvo = eu.pos - alvo.pos
+        angulo_atual = de_alvo.as_polar()[1] if de_alvo.length_squared() > 1 else self.rng.uniform(0, 360)
+        if self.rng.random() < 0.2:
+            self.giro *= -1  # às vezes muda o sentido em que anda em volta do rival
+        indo = self.mover_suave if self.mover_suave.length_squared() > 0.04 else None
+
+        candidatos = []  # (quanto precisa virar, ponto)
+        for tentativa in range(12):
+            sentido = self.giro if tentativa < 8 else -self.giro
+            angulo = angulo_atual + sentido * self.rng.uniform(25, 70)
+            ponto = alvo.pos + Vector2(1, 0).rotate(angulo) * desejada * self.rng.uniform(0.85, 1.15)
+            ponto = arena.limitar(ponto, 90)  # longe das paredes, para não encurralar nos cantos
+            if ponto.distance_to(eu.pos) < 80 or arena.colide_pedra(ponto, eu.raio + 10):
+                continue
+            if eu.natureza is not Natureza.AGUA and any(lago.contem(ponto, 30) for lago in arena.lagos):
+                continue  # a água deixa lento quem não é de Água
+            virada = abs((indo.angle_to(ponto - eu.pos) + 180) % 360 - 180) if indo is not None else 0.0
+            candidatos.append((virada, ponto))
+        if not candidatos:
+            return arena.limitar(alvo.pos + Vector2(1, 0).rotate(angulo_atual) * desejada, 90)
+        # prefere seguir em frente ou fazer uma curva; meia-volta só se não tiver outro jeito
+        suaves = [p for virada, p in candidatos if virada <= 90]
+        return self.rng.choice(suaves) if suaves else min(candidatos, key=lambda c: c[0])[1]
+
+    def preso(self, dt: float, eu: Lutador) -> bool:
+        """True se a IA quer andar mas não sai do lugar (encalhou numa pedra ou parede)."""
+        quer_andar = self.mover_suave.length_squared() > 0.1
+        if quer_andar and self.ultima_pos is not None and dt > 0 and eu.pos.distance_to(self.ultima_pos) < 30 * dt:
             self.tempo_preso += dt
-            if self.tempo_preso > 0.4:  # encalhou numa pedra ou na parede: muda de lado
-                self.giro *= -1
-                self.tempo_preso = 0.0
         else:
             self.tempo_preso = 0.0
         self.ultima_pos = eu.pos.copy()
-        return mover
+        if self.tempo_preso > 0.4:
+            self.tempo_preso = 0.0
+            return True
+        return False
 
     def desviar(self, eu: Lutador, c: Comando) -> bool:
         """Se tem um ataque vindo, sai do caminho. Devolve True se está fugindo."""
